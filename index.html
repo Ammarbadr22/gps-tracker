@@ -206,10 +206,9 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module">
-  import { initializeApp } from "https://esm.sh/firebase@10.7.1/app";
-  import { getDatabase, ref, onValue } from "https://esm.sh/firebase@10.7.1/database";
-
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
   // ================== حط بيانات Firebase بتاعتك هنا ==================
   const firebaseConfig = {
     apiKey: "AIzaSyC5hinks-NQpC5E-Itb9_Yddzyo63ZPY0",
@@ -284,11 +283,10 @@
   }
 
   try {
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-    const gpsRef = ref(db, 'GPS');
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
 
-    onValue(gpsRef, (snapshot) => {
+    db.ref('GPS').on('value', (snapshot) => {
       handleData(snapshot.val());
     }, (error) => {
       statusText.textContent = 'فشل الاتصال — تأكد من إعدادات Firebase';
