@@ -40,7 +40,7 @@
     min-height:100vh;
     -webkit-font-smoothing:antialiased;
   }
-
+ 
   header{
     padding:18px 32px;
     border-bottom:1px solid var(--line-soft);
@@ -70,7 +70,7 @@
     font-size:11.5px;color:var(--muted-2);font-family:var(--mono);
     letter-spacing:.3px;margin-top:2px;
   }
-
+ 
   .status-pill{
     display:flex;align-items:center;gap:8px;
     font-size:12.5px;color:var(--muted);
@@ -96,7 +96,7 @@
     0%,100%{box-shadow:0 0 0 4px var(--accent-soft);}
     50%{box-shadow:0 0 0 8px rgba(47,212,138,0.05);}
   }
-
+ 
   main{
     display:grid;
     grid-template-columns: 340px 1fr;
@@ -106,7 +106,7 @@
     main{grid-template-columns:1fr;}
     #map{min-height:360px;}
   }
-
+ 
   aside{
     background:var(--panel);
     border-left:1px solid var(--line-soft);
@@ -116,7 +116,7 @@
     gap:16px;
     overflow-y:auto;
   }
-
+ 
   .section-label{
     font-size:11px;
     text-transform:uppercase;
@@ -128,7 +128,7 @@
     gap:6px;
     margin:2px 0 -4px;
   }
-
+ 
   .config-note{
     font-size:12.5px;
     color:var(--warn);
@@ -149,7 +149,7 @@
     font-family:var(--mono);
     font-size:11.5px;
   }
-
+ 
   .card{
     background:var(--card);
     border:1px solid var(--line);
@@ -193,12 +193,15 @@
   }
   .card .value.small{font-size:15.5px;}
   .card .unit{font-size:12px;color:var(--muted-2);font-weight:500;margin-right:4px;}
-
+ 
   .card.location{ --card-accent:var(--blue); --card-accent-soft: rgba(77,155,234,0.12); }
   .card.speed{ --card-accent:var(--accent); --card-accent-soft: var(--accent-soft); }
-  .card.time{ --card-accent:#c789ea; --card-accent-soft: rgba(199,137,234,0.12); }
+  .card.heading{ --card-accent:#e0895f; --card-accent-soft: rgba(224,137,95,0.12); }
+  .card.altitude{ --card-accent:#6fb3e0; --card-accent-soft: rgba(111,179,224,0.12); }
   .card.sats{ --card-accent:var(--warn); --card-accent-soft: var(--warn-soft); }
-
+  .card.hdop{ --card-accent:#e0618f; --card-accent-soft: rgba(224,97,143,0.12); }
+  .card.time{ --card-accent:#c789ea; --card-accent-soft: rgba(199,137,234,0.12); }
+ 
   .grid-2{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -218,7 +221,7 @@
     gap:6px;
   }
   .updated svg{width:13px;height:13px;stroke:var(--muted-2);}
-
+ 
   #map{
     width:100%;
     height:100%;
@@ -226,7 +229,7 @@
     background:#0d1512;
   }
   .leaflet-container{background:#0d1512;font-family:var(--sans) !important;}
-
+ 
   .history-list{
     display:flex;
     flex-direction:column;
@@ -249,7 +252,7 @@
   .history-list .row span:last-child{color:var(--muted-2);text-align:left;}
   .history-list::-webkit-scrollbar, aside::-webkit-scrollbar{width:6px;}
   .history-list::-webkit-scrollbar-thumb, aside::-webkit-scrollbar-thumb{background:var(--line);border-radius:10px;}
-
+ 
   footer{
     padding:8px 16px 2px;
     font-size:11px;
@@ -260,7 +263,7 @@
 </style>
 </head>
 <body>
-
+ 
 <header>
   <div class="brand">
     <div class="logo">
@@ -270,8 +273,7 @@
       </svg>
     </div>
     <div>
-      <h1>GPS Tracker Dashboard</h1>
-      <div class="subtitle">ESP8266 · NEO-6M · FIREBASE</div>
+      <h1>GPS Tracker</h1>
     </div>
   </div>
   <div class="status-pill">
@@ -279,14 +281,14 @@
     <span id="status-text">جاري الاتصال بقاعدة البيانات...</span>
   </div>
 </header>
-
+ 
 <main>
   <aside>
     <div class="config-note" id="config-note">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
       <span>لازم تحط بيانات Firebase بتاعتك في أول ملف JavaScript (متغير <code>firebaseConfig</code>) قبل ما الداشبورد يشتغل فعليًا.</span>
     </div>
-
+ 
     <div class="section-label">الموقع</div>
     <div class="card location">
       <div class="card-head">
@@ -297,7 +299,7 @@
       </div>
       <div class="value small" id="lat-lng">-- , --</div>
     </div>
-
+ 
     <div class="section-label">بيانات الحركة</div>
     <div class="grid-2">
       <div class="card speed">
@@ -309,14 +311,23 @@
         </div>
         <div class="value" id="speed">--</div>
       </div>
-      <div class="card time">
+      <div class="card heading">
         <div class="card-head">
-          <span class="label">الوقت</span>
+          <span class="label">الاتجاه</span>
           <div class="icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m12 7 2.5 5.5L12 17l-2.5-4.5Z"/></svg>
           </div>
         </div>
-        <div class="value small" id="heading">--</div>
+        <div class="value" id="course">--</div>
+      </div>
+      <div class="card altitude">
+        <div class="card-head">
+          <span class="label">الارتفاع</span>
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3Z"/></svg>
+          </div>
+        </div>
+        <div class="value" id="alt">--</div>
       </div>
       <div class="card sats">
         <div class="card-head">
@@ -327,35 +338,44 @@
         </div>
         <div class="value" id="sats">--</div>
       </div>
-      <div class="card">
+      <div class="card hdop">
         <div class="card-head">
-          <span class="label">الارتفاع</span>
+          <span class="label">دقة القراءة (HDOP)</span>
           <div class="icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3Z"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
           </div>
         </div>
-        <div class="value" id="alt">--</div>
+        <div class="value" id="hdop">--</div>
+      </div>
+      <div class="card time">
+        <div class="card-head">
+          <span class="label">وقت القراءة</span>
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          </div>
+        </div>
+        <div class="value small" id="gps-time">--</div>
       </div>
     </div>
-
+ 
     <hr class="divider">
-
+ 
     <div class="updated" id="last-updated-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.4 2.6"/><path d="M21 3v6h-6"/></svg>
       <span id="last-updated">آخر تحديث: --</span>
     </div>
-
+ 
     <hr class="divider">
-
+ 
     <div class="section-label">آخر القراءات</div>
     <div class="history-list" id="history"></div>
   </aside>
-
+ 
   <div id="map"></div>
 </main>
-
+ 
 <footer>GPS Tracker · مشروع تخرج · مدعوم بـ Firebase Realtime Database</footer>
-
+ 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
@@ -371,15 +391,15 @@
     appId: "1:278545557855:web:2d8e911701090e10f5eeea"
   };
   // =====================================================================
-
+ 
   const statusText = document.getElementById('status-text');
   const liveDot = document.getElementById('live-dot');
   const configNote = document.getElementById('config-note');
-
+ 
   let map, marker, path;
   const historyPoints = [];
   const MAX_HISTORY = 10;
-
+ 
   function initMap(lat, lng){
     map = L.map('map', { zoomControl: true }).setView([lat, lng], 16);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -395,7 +415,7 @@
     }).addTo(map);
     path = L.polyline([], { color: '#2fd48a', weight: 3, opacity: 0.55 }).addTo(map);
   }
-
+ 
   function updateHistory(lat, lng, time){
     historyPoints.unshift({ lat, lng, time });
     if (historyPoints.length > MAX_HISTORY) historyPoints.pop();
@@ -404,39 +424,41 @@
       `<div class="row"><span>${p.time}</span><span>${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</span></div>`
     ).join('');
   }
-
+ 
   function handleData(data){
     if (!data || data.latitude === undefined || data.longitude === undefined) return;
-
+ 
     const lat = parseFloat(data.latitude);
     const lng = parseFloat(data.longitude);
     if (isNaN(lat) || isNaN(lng)) return;
-
+ 
     if (!map) initMap(lat, lng);
     marker.setLatLng([lat, lng]);
     path.addLatLng([lat, lng]);
     map.panTo([lat, lng]);
-
+ 
     document.getElementById('lat-lng').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
     document.getElementById('speed').innerHTML = data.speed !== undefined ? `${data.speed}<span class="unit">كم/س</span>` : '--';
-    document.getElementById('heading').textContent = data.time !== undefined ? data.time : '--';
+    document.getElementById('course').innerHTML = data.heading !== undefined ? `${data.heading}<span class="unit">°</span>` : '--';
+    document.getElementById('alt').innerHTML = data.altitude !== undefined ? `${data.altitude}<span class="unit">م</span>` : '--';
     document.getElementById('sats').textContent = data.satellites !== undefined ? data.satellites : '--';
-    document.getElementById('alt').textContent = '--';
-
+    document.getElementById('hdop').textContent = data.hdop !== undefined ? data.hdop : '--';
+    document.getElementById('gps-time').textContent = data.time !== undefined ? data.time : '--';
+ 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('ar-EG');
     document.getElementById('last-updated').textContent = `آخر تحديث: ${timeStr}`;
     updateHistory(lat, lng, timeStr);
-
+ 
     liveDot.classList.add('live');
     statusText.textContent = 'متصل — بيانات مباشرة';
     configNote.style.display = 'none';
   }
-
+ 
   try {
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-
+ 
     db.ref('GPS').on('value', (snapshot) => {
       handleData(snapshot.val());
     }, (error) => {
@@ -449,6 +471,7 @@
     console.error(e);
   }
 </script>
-
+ 
 </body>
 </html>
+ 
