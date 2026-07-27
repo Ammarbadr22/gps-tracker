@@ -201,6 +201,35 @@
   .card.altitude{ --card-accent:#6fb3e0; --card-accent-soft: rgba(111,179,224,0.12); }
   .card.sats{ --card-accent:var(--warn); --card-accent-soft: var(--warn-soft); }
   .card.hdop{ --card-accent:#e0618f; --card-accent-soft: rgba(224,97,143,0.12); }
+  .card.hdop .rating{
+    font-size:11px;
+    font-weight:600;
+    margin-right:6px;
+    padding:1px 7px;
+    border-radius:20px;
+    display:inline-block;
+  }
+  .card.hdop .rating.excellent{ background:rgba(47,212,138,0.18); color:#4fe0a8; }
+  .card.hdop .rating.good{ background:rgba(77,155,234,0.18); color:#6fb3e0; }
+  .card.hdop .rating.fair{ background:rgba(234,173,77,0.18); color:#eaad4d; }
+  .card.hdop .rating.poor{ background:rgba(229,97,95,0.18); color:#e5615f; }
+
+  .dimmable{ transition: opacity .3s; }
+  .is-offline .dimmable{ opacity: 0.25; pointer-events: none; }
+  .offline-banner{
+    display:none;
+    font-size:12.5px;
+    color:var(--muted);
+    line-height:1.7;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px;
+    gap:10px;
+    align-items:flex-start;
+  }
+  .is-offline .offline-banner{ display:flex; }
+  .offline-banner svg{width:16px;height:16px;flex-shrink:0;margin-top:2px;stroke:var(--muted);}
   .card.time{ --card-accent:#c789ea; --card-accent-soft: rgba(199,137,234,0.12); }
 
   .grid-2{
@@ -283,11 +312,16 @@
   </div>
 </header>
 
-<main>
+<main id="dashboard-main">
   <aside>
     <div class="config-note" id="config-note">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
       <span>لازم تحط بيانات Firebase بتاعتك في أول ملف JavaScript (متغير <code>firebaseConfig</code>) قبل ما الداشبورد يشتغل فعليًا.</span>
+    </div>
+
+    <div class="offline-banner" id="offline-banner">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      <span>الجهاز غير متصل حاليًا. المعروض تحت هو آخر موقع معروف قبل الانقطاع — بيانات الحركة مش موثوقة دلوقتي.</span>
     </div>
 
     <div class="section-label">الموقع</div>
@@ -300,7 +334,7 @@
       </div>
       <div class="value small" id="lat-lng">-- , --</div>
     </div>
-    <div class="card distance">
+    <div class="card distance dimmable">
       <div class="card-head">
         <span class="label">المسافة المقطوعة (المسار)</span>
         <div class="icon">
@@ -311,7 +345,7 @@
     </div>
 
     <div class="section-label">بيانات الحركة</div>
-    <div class="grid-2">
+    <div class="grid-2 dimmable">
       <div class="card speed">
         <div class="card-head">
           <span class="label">السرعة</span>
@@ -355,7 +389,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
           </div>
         </div>
-        <div class="value" id="hdop">--</div>
+        <div class="value" id="hdop">--<span class="rating" id="hdop-rating"></span></div>
       </div>
       <div class="card time">
         <div class="card-head">
@@ -368,7 +402,7 @@
       </div>
     </div>
 
-    <hr class="divider">
+    <hr class="divider dimmable">
 
     <div class="updated" id="last-updated-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.4 2.6"/><path d="M21 3v6h-6"/></svg>
@@ -414,12 +448,15 @@
   let lastLatLng = null;
   const OFFLINE_THRESHOLD_MS = 15000;
 
+  const dashboardMain = document.getElementById('dashboard-main');
+
   function checkConnectionHealth(){
     if (lastDataTimestamp === null) return;
     const secondsSinceUpdate = (Date.now() - lastDataTimestamp) / 1000;
     if (secondsSinceUpdate > OFFLINE_THRESHOLD_MS / 1000) {
       liveDot.classList.remove('live');
       statusText.textContent = `الجهاز غير متصل — آخر بيانات من ${Math.round(secondsSinceUpdate)} ثانية`;
+      dashboardMain.classList.add('is-offline');
     }
   }
   setInterval(checkConnectionHealth, 3000);
@@ -503,7 +540,24 @@
     document.getElementById('course').innerHTML = data.heading !== undefined ? `${data.heading}<span class="unit">°</span>` : '--';
     document.getElementById('alt').innerHTML = data.altitude !== undefined ? `${data.altitude}<span class="unit">م</span>` : '--';
     document.getElementById('sats').textContent = data.satellites !== undefined ? data.satellites : '--';
-    document.getElementById('hdop').textContent = data.hdop !== undefined ? data.hdop : '--';
+
+    const hdopVal = parseFloat(data.hdop);
+    const hdopEl = document.getElementById('hdop');
+    const ratingEl = document.getElementById('hdop-rating');
+    if (!isNaN(hdopVal) && hdopVal > 0) {
+      hdopEl.childNodes[0].nodeValue = hdopVal.toFixed(2) + ' ';
+      let ratingClass, ratingText;
+      if (hdopVal <= 2) { ratingClass = 'excellent'; ratingText = 'ممتازة'; }
+      else if (hdopVal <= 5) { ratingClass = 'good'; ratingText = 'جيدة'; }
+      else if (hdopVal <= 10) { ratingClass = 'fair'; ratingText = 'مقبولة'; }
+      else { ratingClass = 'poor'; ratingText = 'ضعيفة'; }
+      ratingEl.textContent = ratingText;
+      ratingEl.className = 'rating ' + ratingClass;
+    } else {
+      hdopEl.childNodes[0].nodeValue = '-- ';
+      ratingEl.textContent = '';
+    }
+
     document.getElementById('gps-time').textContent = data.time !== undefined ? data.time : '--';
 
     const now = new Date();
@@ -520,12 +574,14 @@
       if (secondsSinceUpdate > OFFLINE_THRESHOLD_MS / 1000) {
         liveDot.classList.remove('live');
         statusText.textContent = `الجهاز غير متصل — آخر بيانات من ${Math.round(secondsSinceUpdate)} ثانية`;
+        dashboardMain.classList.add('is-offline');
         return;
       }
     } else {
       lastDataTimestamp = Date.now();
     }
 
+    dashboardMain.classList.remove('is-offline');
     liveDot.classList.add('live');
     statusText.textContent = 'متصل — بيانات مباشرة';
     configNote.style.display = 'none';
