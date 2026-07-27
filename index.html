@@ -426,6 +426,16 @@
 
   const MIN_DISTANCE_M = 5;    // ignore GPS jitter smaller than this
   const MIN_SPEED_KMPH = 1.5;  // treat anything below this as stationary
+  const SMOOTHING_WINDOW = 5;  // average the last N raw readings to cut jitter
+  const rawPointsBuffer = [];
+
+  function getSmoothedPoint(lat, lng){
+    rawPointsBuffer.push({ lat, lng });
+    if (rawPointsBuffer.length > SMOOTHING_WINDOW) rawPointsBuffer.shift();
+    const avgLat = rawPointsBuffer.reduce((s, p) => s + p.lat, 0) / rawPointsBuffer.length;
+    const avgLng = rawPointsBuffer.reduce((s, p) => s + p.lng, 0) / rawPointsBuffer.length;
+    return { lat: avgLat, lng: avgLng };
+  }
 
   function updateDistance(lat, lng){
     const current = L.latLng(lat, lng);
@@ -480,10 +490,11 @@
     if (isNaN(lat) || isNaN(lng)) return;
 
     if (!map) initMap(lat, lng);
-    marker.setLatLng([lat, lng]);
-    path.addLatLng([lat, lng]);
-    map.panTo([lat, lng]);
-    updateDistance(lat, lng);
+    const smoothed = getSmoothedPoint(lat, lng);
+    marker.setLatLng([smoothed.lat, smoothed.lng]);
+    path.addLatLng([smoothed.lat, smoothed.lng]);
+    map.panTo([smoothed.lat, smoothed.lng]);
+    updateDistance(smoothed.lat, smoothed.lng);
 
     document.getElementById('lat-lng').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
     const speedVal = parseFloat(data.speed);
