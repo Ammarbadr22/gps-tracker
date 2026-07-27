@@ -214,8 +214,7 @@
   .card.hdop .rating.fair{ background:rgba(234,173,77,0.18); color:#eaad4d; }
   .card.hdop .rating.poor{ background:rgba(229,97,95,0.18); color:#e5615f; }
 
-  .dimmable{ transition: opacity .3s; }
-  .is-offline .dimmable{ opacity: 0.25; pointer-events: none; }
+  .is-offline .dimmable{ display:none; }
   .offline-banner{
     display:none;
     font-size:12.5px;
@@ -321,7 +320,7 @@
 
     <div class="offline-banner" id="offline-banner">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
-      <span>الجهاز غير متصل حاليًا. المعروض تحت هو آخر موقع معروف قبل الانقطاع — بيانات الحركة مش موثوقة دلوقتي.</span>
+      <span>الجهاز غير متصل حاليًا. المعروض تحت هو آخر موقع معروف وآخر وقت قراءة قبل الانقطاع فقط.</span>
     </div>
 
     <div class="section-label">الموقع</div>
@@ -344,7 +343,7 @@
       <div class="value" id="distance">0<span class="unit">م</span></div>
     </div>
 
-    <div class="section-label">بيانات الحركة</div>
+    <div class="section-label dimmable">بيانات الحركة</div>
     <div class="grid-2 dimmable">
       <div class="card speed">
         <div class="card-head">
@@ -409,10 +408,10 @@
       <span id="last-updated">آخر تحديث: --</span>
     </div>
 
-    <hr class="divider">
+    <hr class="divider dimmable">
 
-    <div class="section-label">آخر القراءات</div>
-    <div class="history-list" id="history"></div>
+    <div class="section-label dimmable">آخر القراءات</div>
+    <div class="history-list dimmable" id="history"></div>
   </aside>
 
   <div id="map"></div>
@@ -445,17 +444,33 @@
   const MAX_HISTORY = 10;
   let lastDataTimestamp = null;
   let totalDistanceM = 0;
-  let lastLatLng = null;
   const OFFLINE_THRESHOLD_MS = 15000;
 
+  // "confirmed" is the official stable position — only it moves the marker/
+  // path and counts toward distance. A reading has to drift away from it for
+  // CONFIRM_STREAK consecutive updates, landing in roughly the same new spot
+  // each time, before it's trusted as real movement instead of GPS jitter.
+  let confirmedLatLng = null;
+  let pendingLatLng = null;
+  let pendingStreak = 0;
+  let isDeviceMoving = false;
+
   const dashboardMain = document.getElementById('dashboard-main');
+
+  function formatElapsed(totalSeconds){
+    const s = Math.round(totalSeconds);
+    if (s < 60) return `${s} ثانية`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} دقيقة`;
+    return `${Math.floor(m / 60)} ساعة`;
+  }
 
   function checkConnectionHealth(){
     if (lastDataTimestamp === null) return;
     const secondsSinceUpdate = (Date.now() - lastDataTimestamp) / 1000;
     if (secondsSinceUpdate > OFFLINE_THRESHOLD_MS / 1000) {
       liveDot.classList.remove('live');
-      statusText.textContent = `الجهاز غير متصل — آخر بيانات من ${Math.round(secondsSinceUpdate)} ثانية`;
+      statusText.textContent = `الجهاز غير متصل — آخر بيانات من ${formatElapsed(secondsSinceUpdate)}`;
       dashboardMain.classList.add('is-offline');
     }
   }
@@ -464,6 +479,7 @@
   const MIN_DISTANCE_M = 5;    // ignore GPS jitter smaller than this
   const MIN_SPEED_KMPH = 1.5;  // treat anything below this as stationary
   const SMOOTHING_WINDOW = 5;  // average the last N raw readings to cut jitter
+  const CONFIRM_STREAK = 2;    // consecutive readings needed in a new spot before it counts as real movement
   const rawPointsBuffer = [];
 
   function getSmoothedPoint(lat, lng){
@@ -474,24 +490,69 @@
     return { lat: avgLat, lng: avgLng };
   }
 
-  function updateDistance(lat, lng){
-    const current = L.latLng(lat, lng);
-    if (lastLatLng) {
-      const delta = lastLatLng.distanceTo(current);
-      // Ignore tiny jumps — this is normal GPS jitter, not real movement
-      if (delta >= MIN_DISTANCE_M) {
-        totalDistanceM += delta;
-        lastLatLng = current;
-      }
-    } else {
-      lastLatLng = current;
-    }
+  function updateDistanceDisplay(){
     const el = document.getElementById('distance');
     if (totalDistanceM >= 1000) {
       el.innerHTML = `${(totalDistanceM / 1000).toFixed(2)}<span class="unit">كم</span>`;
     } else {
       el.innerHTML = `${Math.round(totalDistanceM)}<span class="unit">م</span>`;
     }
+  }
+
+  // Decides whether a new smoothed point is real movement or just GPS jitter.
+  // A single reading that drifts away from the confirmed spot is NOT enough
+  // on its own — it has to land in roughly the same new spot again on the
+  // next reading(s) before it's trusted. Only confirmed movement updates the
+  // marker/path/distance, so a stationary device stays visually stationary.
+  function resolveMovement(lat, lng, speedIndicatesMoving){
+    const point = L.latLng(lat, lng);
+
+    if (!confirmedLatLng) {
+      confirmedLatLng = point;
+      isDeviceMoving = true; // nothing to compare yet — show the first fix as-is
+      return { moved: true, point };
+    }
+
+    // The device's own reported speed is a second, independent signal (not
+    // derived from these lat/lng deltas) — if it says we're not moving,
+    // trust that outright and don't even let position drift start a streak.
+    if (!speedIndicatesMoving) {
+      pendingLatLng = null;
+      pendingStreak = 0;
+      isDeviceMoving = false;
+      return { moved: false, point: confirmedLatLng };
+    }
+
+    const distFromConfirmed = confirmedLatLng.distanceTo(point);
+
+    if (distFromConfirmed < MIN_DISTANCE_M) {
+      // basically still at the confirmed spot — plain jitter, nothing pending
+      pendingLatLng = null;
+      pendingStreak = 0;
+      isDeviceMoving = false;
+      return { moved: false, point: confirmedLatLng };
+    }
+
+    // looks like it moved — but wait for it to repeat before trusting it
+    if (pendingLatLng && pendingLatLng.distanceTo(point) < MIN_DISTANCE_M) {
+      pendingStreak++;
+    } else {
+      pendingStreak = 1;
+    }
+    pendingLatLng = point;
+
+    if (pendingStreak >= CONFIRM_STREAK) {
+      totalDistanceM += confirmedLatLng.distanceTo(point);
+      confirmedLatLng = point;
+      pendingLatLng = null;
+      pendingStreak = 0;
+      isDeviceMoving = true;
+      updateDistanceDisplay();
+      return { moved: true, point };
+    }
+
+    isDeviceMoving = false;
+    return { moved: false, point: confirmedLatLng };
   }
 
   function initMap(lat, lng){
@@ -527,18 +588,32 @@
     if (isNaN(lat) || isNaN(lng)) return;
 
     if (!map) initMap(lat, lng);
+
+    // Speed comes from the module itself, not from these lat/lng readings,
+    // so it's used as an independent check on whether we're really moving.
+    // If speed is missing for some reason, fall back to position-only logic
+    // instead of silently freezing everything.
+    const speedVal = parseFloat(data.speed);
+    const speedIndicatesMoving = isNaN(speedVal) ? true : speedVal >= MIN_SPEED_KMPH;
+
     const smoothed = getSmoothedPoint(lat, lng);
-    marker.setLatLng([smoothed.lat, smoothed.lng]);
-    path.addLatLng([smoothed.lat, smoothed.lng]);
-    map.panTo([smoothed.lat, smoothed.lng]);
-    updateDistance(smoothed.lat, smoothed.lng);
+    const movement = resolveMovement(smoothed.lat, smoothed.lng, speedIndicatesMoving);
+    if (movement.moved) {
+      marker.setLatLng(movement.point);
+      path.addLatLng(movement.point);
+      map.panTo(movement.point);
+    }
 
     document.getElementById('lat-lng').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    const speedVal = parseFloat(data.speed);
     const displaySpeed = (!isNaN(speedVal) && speedVal < MIN_SPEED_KMPH) ? 0 : speedVal;
     document.getElementById('speed').innerHTML = data.speed !== undefined ? `${displaySpeed.toFixed(1)}<span class="unit">كم/س</span>` : '--';
-    document.getElementById('course').innerHTML = data.heading !== undefined ? `${data.heading}<span class="unit">°</span>` : '--';
-    document.getElementById('alt').innerHTML = data.altitude !== undefined ? `${data.altitude}<span class="unit">م</span>` : '--';
+    // Heading & altitude are derived from noisy consecutive fixes, so they
+    // swing wildly while stationary. Only refresh them while movement is
+    // actually confirmed — otherwise keep showing the last real value.
+    if (isDeviceMoving) {
+      document.getElementById('course').innerHTML = data.heading !== undefined ? `${data.heading}<span class="unit">°</span>` : '--';
+      document.getElementById('alt').innerHTML = data.altitude !== undefined ? `${data.altitude}<span class="unit">م</span>` : '--';
+    }
     document.getElementById('sats').textContent = data.satellites !== undefined ? data.satellites : '--';
 
     const hdopVal = parseFloat(data.hdop);
@@ -573,7 +648,7 @@
       const secondsSinceUpdate = (Date.now() - lastDataTimestamp) / 1000;
       if (secondsSinceUpdate > OFFLINE_THRESHOLD_MS / 1000) {
         liveDot.classList.remove('live');
-        statusText.textContent = `الجهاز غير متصل — آخر بيانات من ${Math.round(secondsSinceUpdate)} ثانية`;
+        statusText.textContent = `الجهاز غير متصل — آخر بيانات من ${formatElapsed(secondsSinceUpdate)}`;
         dashboardMain.classList.add('is-offline');
         return;
       }
