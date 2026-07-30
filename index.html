@@ -191,26 +191,8 @@
     font-weight:600;
     letter-spacing:-.2px;
   }
-  .card .value.small{font-size:15.5px;}
+  .card .value.small{font-size:15.5px;line-height:1.45;}
   .card .unit{font-size:12px;color:var(--muted-2);font-weight:500;margin-right:4px;}
-
-  /* Address replaces the raw coordinates as the primary value: it's prose,
-     not a number, so it gets the body font, a smaller size and room to wrap
-     onto a couple of lines instead of the single-line mono number style. */
-  .card .value.address{
-    font-family:var(--sans);
-    font-size:13.5px;
-    font-weight:500;
-    line-height:1.55;
-    letter-spacing:0;
-  }
-  .card .coords{
-    font-size:10.5px;
-    font-family:var(--mono);
-    color:var(--muted-2);
-    margin-top:7px;
-    letter-spacing:.2px;
-  }
 
   .card.location{ --card-accent:var(--blue); --card-accent-soft: rgba(77,155,234,0.12); }
   .card.distance{ --card-accent:#4dd0c8; --card-accent-soft: rgba(77,208,200,0.12); }
@@ -338,18 +320,18 @@
 
     <div class="offline-banner" id="offline-banner">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
-      <span>الجهاز غير متصل حاليًا. العنوان والموقع المعروضين تحت هما آخر عنوان وآخر وقت قراءة معروفين قبل الانقطاع فقط.</span>
+      <span>الجهاز غير متصل حاليًا. المعروض تحت هو آخر موقع معروف وآخر وقت قراءة قبل الانقطاع فقط.</span>
     </div>
 
     <div class="section-label">الموقع</div>
     <div class="card location">
       <div class="card-head">
+        <span class="label">العنوان الحالي</span>
         <div class="icon">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
         </div>
       </div>
-      <div class="value address" id="address">جاري تحديد العنوان...</div>
-      <div class="coords" id="lat-lng">-- , --</div>
+      <div class="value small" id="lat-lng">--</div>
     </div>
     <div class="card distance dimmable">
       <div class="card-head">
@@ -475,12 +457,28 @@
 
   const dashboardMain = document.getElementById('dashboard-main');
 
+  // Reverse-geocoding state (lat/lng -> human-readable address). Nominatim's
+  // usage policy caps requests at ~1/second and asks clients to cache
+  // results and avoid unnecessary calls, so lookups are throttled by both a
+  // minimum distance and a minimum time gap — see maybeReverseGeocode().
+  let lastGeocodedLatLng = null;
+  let lastGeocodeTime = 0;
+  let geocodeInFlight = false;
+  const GEOCODE_MIN_INTERVAL_MS = 15000; // stay well under Nominatim's rate limit
+  const GEOCODE_MIN_DISTANCE_M = 25;     // skip re-lookup for very small moves
+
   function formatElapsed(totalSeconds){
     const s = Math.round(totalSeconds);
     if (s < 60) return `${s} ثانية`;
     const m = Math.floor(s / 60);
     if (m < 60) return `${m} دقيقة`;
     return `${Math.floor(m / 60)} ساعة`;
+  }
+
+  function degreesToCompass(deg){
+    const directions = ['N','NE','E','SE','S','SW','W','NW'];
+    const idx = Math.round((((deg % 360) + 360) % 360) / 45) % 8;
+    return directions[idx];
   }
 
   function checkConnectionHealth(){
@@ -573,6 +571,67 @@
     return { moved: false, point: confirmedLatLng };
   }
 
+  // Turns a Nominatim result into a short, readable line (road + area/city)
+  // instead of its long, comma-heavy full "display_name".
+  function formatAddress(result){
+    if (!result) return null;
+    const a = result.address || {};
+    const road = a.road || a.pedestrian || a.footway || a.neighbourhood;
+    const area = a.suburb || a.neighbourhood || a.quarter;
+    const city = a.city || a.town || a.village || a.county;
+    const parts = [];
+    if (road) parts.push(road);
+    if (area && area !== road) parts.push(area);
+    if (city && city !== area) parts.push(city);
+    return parts.length ? parts.join('، ') : (result.display_name || null);
+  }
+
+  // Free OSM reverse geocoding — no API key needed. Falls back to showing
+  // raw coordinates if the lookup fails, so the card never gets stuck empty.
+  async function reverseGeocode(lat, lng){
+    const el = document.getElementById('lat-lng');
+    geocodeInFlight = true;
+    el.textContent = 'جاري تحديد العنوان...';
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=ar`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('reverse geocode request failed');
+      const result = await res.json();
+      if (result && result.error) throw new Error(result.error);
+      const formatted = formatAddress(result);
+      if (formatted) {
+        el.textContent = formatted;
+        el.title = `${result.display_name || formatted} — ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      } else {
+        el.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        el.title = '';
+      }
+    } catch (err) {
+      console.error('reverse geocoding error:', err);
+      el.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      el.title = 'تعذر تحديد العنوان — تم عرض الإحداثيات بدلاً منه';
+    } finally {
+      geocodeInFlight = false;
+    }
+  }
+
+  // Only called when resolveMovement() has confirmed real movement (never on
+  // raw jitter), and further throttled here by distance + time so a fast-
+  // moving device can't spam the geocoding service.
+  function maybeReverseGeocode(lat, lng){
+    if (geocodeInFlight) return;
+    const point = L.latLng(lat, lng);
+    const now = Date.now();
+    const isFirstFix = !lastGeocodedLatLng;
+    const movedFarEnough = isFirstFix || lastGeocodedLatLng.distanceTo(point) >= GEOCODE_MIN_DISTANCE_M;
+    const enoughTimePassed = isFirstFix || (now - lastGeocodeTime) >= GEOCODE_MIN_INTERVAL_MS;
+    if (!movedFarEnough || !enoughTimePassed) return;
+
+    lastGeocodedLatLng = point;
+    lastGeocodeTime = now;
+    reverseGeocode(lat, lng);
+  }
+
   function initMap(lat, lng){
     map = L.map('map', { zoomControl: true }).setView([lat, lng], 16);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -598,64 +657,6 @@
     ).join('');
   }
 
-  // ---- Compass direction from a heading in degrees (0-360, 0 = North) ----
-  const COMPASS_POINTS = ['N','NE','E','SE','S','SW','W','NW'];
-  function degToCompass(deg){
-    const d = ((deg % 360) + 360) % 360; // normalize negative/overflowing values
-    const index = Math.round(d / 45) % 8;
-    return COMPASS_POINTS[index];
-  }
-
-  // ---- Reverse geocoding (coordinates -> human-readable address) ----
-  // Uses OpenStreetMap's free Nominatim API. Nominatim's usage policy caps
-  // requests at ~1/sec and asks that you not hammer it, so this is throttled
-  // hard: it only fires when the device has moved a meaningful distance AND
-  // enough time has passed since the last lookup. A stationary device will
-  // not keep re-requesting the same address.
-  //
-  // lastKnownAddress is the source of truth for what's on screen. A lookup
-  // that fails or comes back empty (e.g. the request happens to be in flight
-  // right as the device drops offline) must NOT blank out or overwrite a
-  // previously resolved address — it just leaves lastKnownAddress as-is, so
-  // the dashboard keeps showing the last real address instead of falling
-  // back to raw numbers. The "تعذر تحديد العنوان" message only ever appears
-  // if we have never successfully resolved an address at all yet.
-  const addressEl = document.getElementById('address');
-  let lastGeocodedPoint = null;
-  let lastGeocodeTime = 0;
-  let lastKnownAddress = null;
-  const GEOCODE_MIN_INTERVAL_MS = 15000; // don't call more than once per 15s
-  const GEOCODE_MIN_DISTANCE_M = 30;     // don't re-lookup unless moved this far
-
-  function maybeReverseGeocode(point){
-    const now = Date.now();
-    if (now - lastGeocodeTime < GEOCODE_MIN_INTERVAL_MS) return;
-    if (lastGeocodedPoint && point.distanceTo(lastGeocodedPoint) < GEOCODE_MIN_DISTANCE_M) return;
-
-    lastGeocodeTime = now;
-    lastGeocodedPoint = point;
-
-    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.lat}&lon=${point.lng}&accept-language=ar&zoom=18`)
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.display_name) {
-          lastKnownAddress = data.display_name;
-          addressEl.textContent = lastKnownAddress;
-        } else if (!lastKnownAddress) {
-          addressEl.textContent = 'تعذر تحديد العنوان';
-        }
-        // else: lookup came back empty but we already have a good address
-        // on screen — leave it exactly as it is.
-      })
-      .catch(() => {
-        if (!lastKnownAddress) {
-          addressEl.textContent = 'تعذر تحديد العنوان';
-        }
-        // else: request failed (e.g. mid-disconnect) — keep the last known
-        // address showing rather than replacing it with an error.
-      });
-  }
-
   function handleData(data){
     if (!data || data.latitude === undefined || data.longitude === undefined) return;
 
@@ -678,10 +679,8 @@
       marker.setLatLng(movement.point);
       path.addLatLng(movement.point);
       map.panTo(movement.point);
+      maybeReverseGeocode(movement.point.lat, movement.point.lng);
     }
-
-    document.getElementById('lat-lng').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    maybeReverseGeocode(movement.point);
 
     const displaySpeed = (!isNaN(speedVal) && speedVal < MIN_SPEED_KMPH) ? 0 : speedVal;
     document.getElementById('speed').innerHTML = data.speed !== undefined ? `${displaySpeed.toFixed(1)}<span class="unit">كم/س</span>` : '--';
@@ -689,12 +688,10 @@
     // swing wildly while stationary. Only refresh them while movement is
     // actually confirmed — otherwise keep showing the last real value.
     if (isDeviceMoving) {
-      if (data.heading !== undefined) {
-        const compass = degToCompass(parseFloat(data.heading));
-        document.getElementById('course').innerHTML = `${data.heading}<span class="unit">° ${compass}</span>`;
-      } else {
-        document.getElementById('course').innerHTML = '--';
-      }
+      const headingVal = parseFloat(data.heading);
+      document.getElementById('course').innerHTML = (data.heading !== undefined && !isNaN(headingVal))
+        ? `${data.heading}<span class="unit">° ${degreesToCompass(headingVal)}</span>`
+        : '--';
       document.getElementById('alt').innerHTML = data.altitude !== undefined ? `${data.altitude}<span class="unit">م</span>` : '--';
     }
     document.getElementById('sats').textContent = data.satellites !== undefined ? data.satellites : '--';
