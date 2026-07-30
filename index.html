@@ -338,7 +338,7 @@
 
     <div class="offline-banner" id="offline-banner">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
-      <span>الجهاز غير متصل حاليًا. المعروض تحت هو آخر موقع معروف وآخر وقت قراءة قبل الانقطاع فقط.</span>
+      <span>الجهاز غير متصل حاليًا. العنوان والموقع المعروضين تحت هما آخر عنوان وآخر وقت قراءة معروفين قبل الانقطاع فقط.</span>
     </div>
 
     <div class="section-label">الموقع</div>
@@ -613,9 +613,18 @@
   // hard: it only fires when the device has moved a meaningful distance AND
   // enough time has passed since the last lookup. A stationary device will
   // not keep re-requesting the same address.
+  //
+  // lastKnownAddress is the source of truth for what's on screen. A lookup
+  // that fails or comes back empty (e.g. the request happens to be in flight
+  // right as the device drops offline) must NOT blank out or overwrite a
+  // previously resolved address — it just leaves lastKnownAddress as-is, so
+  // the dashboard keeps showing the last real address instead of falling
+  // back to raw numbers. The "تعذر تحديد العنوان" message only ever appears
+  // if we have never successfully resolved an address at all yet.
   const addressEl = document.getElementById('address');
   let lastGeocodedPoint = null;
   let lastGeocodeTime = 0;
+  let lastKnownAddress = null;
   const GEOCODE_MIN_INTERVAL_MS = 15000; // don't call more than once per 15s
   const GEOCODE_MIN_DISTANCE_M = 30;     // don't re-lookup unless moved this far
 
@@ -630,10 +639,21 @@
     fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.lat}&lon=${point.lng}&accept-language=ar&zoom=18`)
       .then(res => res.json())
       .then(data => {
-        addressEl.textContent = data && data.display_name ? data.display_name : 'تعذر تحديد العنوان';
+        if (data && data.display_name) {
+          lastKnownAddress = data.display_name;
+          addressEl.textContent = lastKnownAddress;
+        } else if (!lastKnownAddress) {
+          addressEl.textContent = 'تعذر تحديد العنوان';
+        }
+        // else: lookup came back empty but we already have a good address
+        // on screen — leave it exactly as it is.
       })
       .catch(() => {
-        addressEl.textContent = 'تعذر تحديد العنوان';
+        if (!lastKnownAddress) {
+          addressEl.textContent = 'تعذر تحديد العنوان';
+        }
+        // else: request failed (e.g. mid-disconnect) — keep the last known
+        // address showing rather than replacing it with an error.
       });
   }
 
