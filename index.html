@@ -344,6 +344,7 @@
     <div class="section-label">الموقع</div>
     <div class="card location">
       <div class="card-head">
+        <span class="label">العنوان</span>
         <div class="icon">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
         </div>
@@ -421,7 +422,7 @@
 
     <hr class="divider dimmable">
 
-    <div class="updated" id="last-updated-wrap">
+    <div class="updated dimmable" id="last-updated-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.4 2.6"/><path d="M21 3v6h-6"/></svg>
       <span id="last-updated">آخر تحديث: --</span>
     </div>
@@ -718,8 +719,13 @@
 
     document.getElementById('gps-time').textContent = data.time !== undefined ? data.time : '--';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('ar-EG');
+    // "آخر تحديث" must reflect when the DEVICE last wrote to Firebase, not
+    // when this browser tab happened to load/receive the snapshot — those
+    // are different moments (Firebase's .on('value') fires immediately with
+    // whatever is already stored, even if that data is old). data.last_updated
+    // is the server timestamp set at write time, so use that when present.
+    const updatedAt = data.last_updated ? new Date(data.last_updated) : new Date();
+    const timeStr = updatedAt.toLocaleTimeString('ar-EG');
     document.getElementById('last-updated').textContent = `آخر تحديث: ${timeStr}`;
     updateHistory(lat, lng, timeStr);
 
