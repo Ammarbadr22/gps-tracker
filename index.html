@@ -467,21 +467,38 @@
 
   // "confirmed" is the official stable position shown on the map.
   //
-  // The two states behave differently on purpose:
-  //  - STATIONARY: a reading suggesting movement must be confirmed by one
-  //    more consecutive reading landing in roughly the same new spot before
-  //    it's trusted. This rejects a single noisy speed/position spike while
-  //    parked.
-  //  - MOVING: once motion is already confirmed, every qualifying reading
-  //    is committed immediately with no further waiting — this is what
-  //    keeps continuous motion tracking smoothly instead of freezing and
-  //    then jumping to catch up.
-  // Speed drops below threshold -> always switches back to stationary
-  // immediately; there's no cost to stopping right away.
+  // Motion confirmation is now driven purely by SPEED, not by whether two
+  // consecutive smoothed positions happen to land close together.
+  //
+  // Why: the old rule required the current reading's position to fall
+  // within MIN_DISTANCE_M of the *previous* pending reading before trusting
+  // a stationary->moving transition. But if the device moves at any
+  // reasonable, roughly constant speed, the gap between consecutive
+  // readings is itself usually bigger than MIN_DISTANCE_M (distance covered
+  // per update interval), so that "did it land in the same new spot"
+  // condition could fail on every single reading while the device keeps
+  // walking/driving in a straight line — motionState stays stuck on
+  // 'stationary' indefinitely, not just for one reading. The marker then
+  // freezes for an extended period and only jumps once some reading
+  // happens to land close to the previous one (e.g. a slight pause or turn)
+  // — the exact "freeze then big jump" symptom we're trying to avoid, just
+  // triggered a different way.
+  //
+  // Fix: confirm motion using CONFIRM_READINGS consecutive readings whose
+  // reported speed is above threshold, completely independent of how far
+  // apart the positions are. This can't get stuck the same way, since it
+  // never depends on step size.
+  //  - STATIONARY: needs CONFIRM_READINGS consecutive speed-qualifying
+  //    readings before switching to 'moving'.
+  //  - MOVING: once confirmed, every qualifying reading commits immediately
+  //    (no further waiting) — keeps continuous motion tracking smooth.
+  //  - Speed drops below threshold -> always switches back to stationary
+  //    immediately; there's no cost to stopping right away.
   let confirmedLatLng = null;
-  let pendingLatLng = null;
   let motionState = 'stationary';
   let isDeviceMoving = false;
+  let consecutiveMovingReadings = 0;
+  const CONFIRM_READINGS = 2; // consecutive above-threshold speed readings needed to confirm motion
 
   const dashboardMain = document.getElementById('dashboard-main');
 
@@ -504,7 +521,7 @@
   }
   setInterval(checkConnectionHealth, 3000);
 
-  const MIN_DISTANCE_M = 5;    // ignore GPS jitter smaller than this per step
+  const MIN_DISTANCE_M = 5;    // ignore GPS jitter smaller than this per confirmed step (distance accounting only)
   const MIN_SPEED_KMPH = 1.5;  // treat anything below this as stationary
   const SMOOTHING_WINDOW = 3;  // average the last N raw readings to cut jitter
   const rawPointsBuffer = [];
@@ -527,8 +544,11 @@
   }
 
   // Decides whether a new smoothed point is real movement or just GPS jitter.
-  // See the state comments above `confirmedLatLng` for the stationary vs.
-  // moving behavior difference.
+  // Confirmation is based purely on consecutive speed readings (see the
+  // comments above `confirmedLatLng`) — never on how close two positions are
+  // to each other. Position is still used to (a) decide how far the marker
+  // actually moves and (b) filter out sub-MIN_DISTANCE_M jitter from the
+  // odometer once motion is already confirmed.
   function resolveMovement(lat, lng, speedIndicatesMoving){
     const point = L.latLng(lat, lng);
 
@@ -536,49 +556,35 @@
       confirmedLatLng = point;
       motionState = 'stationary';
       isDeviceMoving = true; // nothing to compare yet — show the first fix as-is
+      consecutiveMovingReadings = 0;
       return { moved: true, point };
     }
 
     if (!speedIndicatesMoving) {
       motionState = 'stationary';
-      pendingLatLng = null;
+      consecutiveMovingReadings = 0;
       isDeviceMoving = false;
       return { moved: false, point: confirmedLatLng };
     }
 
-    const dist = confirmedLatLng.distanceTo(point);
+    // Speed says "moving" — count consecutive qualifying readings.
+    consecutiveMovingReadings++;
 
-    if (dist < MIN_DISTANCE_M) {
-      // Speed says "moving" but the position barely changed — noise, not motion.
-      pendingLatLng = null;
-      isDeviceMoving = false;
-      return { moved: false, point: confirmedLatLng };
-    }
-
-    if (motionState === 'moving') {
-      // Already confirmed as moving — commit every qualifying reading right
-      // away, no waiting. This is what keeps continuous motion smooth.
-      totalDistanceM += dist;
-      confirmedLatLng = point;
-      isDeviceMoving = true;
-      updateDistanceDisplay();
-      return { moved: true, point };
-    }
-
-    // Currently stationary but this reading suggests movement — require one
-    // more consecutive reading to land in roughly the same new spot before
-    // trusting it, to reject a single noisy speed/position spike.
-    if (pendingLatLng && pendingLatLng.distanceTo(point) < MIN_DISTANCE_M) {
-      totalDistanceM += dist;
+    if (motionState === 'moving' || consecutiveMovingReadings >= CONFIRM_READINGS) {
+      const dist = confirmedLatLng.distanceTo(point);
+      // Only add to the odometer if the step is bigger than jitter noise.
+      if (dist >= MIN_DISTANCE_M) {
+        totalDistanceM += dist;
+        updateDistanceDisplay();
+      }
       confirmedLatLng = point;
       motionState = 'moving';
       isDeviceMoving = true;
-      pendingLatLng = null;
-      updateDistanceDisplay();
       return { moved: true, point };
     }
 
-    pendingLatLng = point;
+    // Speed suggests movement but we haven't hit CONFIRM_READINGS yet —
+    // keep showing the last confirmed position for now.
     isDeviceMoving = false;
     return { moved: false, point: confirmedLatLng };
   }
