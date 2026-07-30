@@ -465,13 +465,22 @@
   let totalDistanceM = 0;
   const OFFLINE_THRESHOLD_MS = 15000;
 
-  // "confirmed" is the official stable position — only it moves the marker/
-  // path and counts toward distance. A reading has to drift away from it for
-  // CONFIRM_STREAK consecutive updates, landing in roughly the same new spot
-  // each time, before it's trusted as real movement instead of GPS jitter.
+  // "confirmed" is the official stable position shown on the map.
+  //
+  // The two states behave differently on purpose:
+  //  - STATIONARY: a reading suggesting movement must be confirmed by one
+  //    more consecutive reading landing in roughly the same new spot before
+  //    it's trusted. This rejects a single noisy speed/position spike while
+  //    parked.
+  //  - MOVING: once motion is already confirmed, every qualifying reading
+  //    is committed immediately with no further waiting — this is what
+  //    keeps continuous motion tracking smoothly instead of freezing and
+  //    then jumping to catch up.
+  // Speed drops below threshold -> always switches back to stationary
+  // immediately; there's no cost to stopping right away.
   let confirmedLatLng = null;
   let pendingLatLng = null;
-  let pendingStreak = 0;
+  let motionState = 'stationary';
   let isDeviceMoving = false;
 
   const dashboardMain = document.getElementById('dashboard-main');
@@ -495,10 +504,9 @@
   }
   setInterval(checkConnectionHealth, 3000);
 
-  const MIN_DISTANCE_M = 5;    // ignore GPS jitter smaller than this
+  const MIN_DISTANCE_M = 5;    // ignore GPS jitter smaller than this per step
   const MIN_SPEED_KMPH = 1.5;  // treat anything below this as stationary
-  const SMOOTHING_WINDOW = 5;  // average the last N raw readings to cut jitter
-  const CONFIRM_STREAK = 2;    // consecutive readings needed in a new spot before it counts as real movement
+  const SMOOTHING_WINDOW = 3;  // average the last N raw readings to cut jitter
   const rawPointsBuffer = [];
 
   function getSmoothedPoint(lat, lng){
@@ -519,57 +527,58 @@
   }
 
   // Decides whether a new smoothed point is real movement or just GPS jitter.
-  // A single reading that drifts away from the confirmed spot is NOT enough
-  // on its own — it has to land in roughly the same new spot again on the
-  // next reading(s) before it's trusted. Only confirmed movement updates the
-  // marker/path/distance, so a stationary device stays visually stationary.
+  // See the state comments above `confirmedLatLng` for the stationary vs.
+  // moving behavior difference.
   function resolveMovement(lat, lng, speedIndicatesMoving){
     const point = L.latLng(lat, lng);
 
     if (!confirmedLatLng) {
       confirmedLatLng = point;
+      motionState = 'stationary';
       isDeviceMoving = true; // nothing to compare yet — show the first fix as-is
       return { moved: true, point };
     }
 
-    // The device's own reported speed is a second, independent signal (not
-    // derived from these lat/lng deltas) — if it says we're not moving,
-    // trust that outright and don't even let position drift start a streak.
     if (!speedIndicatesMoving) {
+      motionState = 'stationary';
       pendingLatLng = null;
-      pendingStreak = 0;
       isDeviceMoving = false;
       return { moved: false, point: confirmedLatLng };
     }
 
-    const distFromConfirmed = confirmedLatLng.distanceTo(point);
+    const dist = confirmedLatLng.distanceTo(point);
 
-    if (distFromConfirmed < MIN_DISTANCE_M) {
-      // basically still at the confirmed spot — plain jitter, nothing pending
+    if (dist < MIN_DISTANCE_M) {
+      // Speed says "moving" but the position barely changed — noise, not motion.
       pendingLatLng = null;
-      pendingStreak = 0;
       isDeviceMoving = false;
       return { moved: false, point: confirmedLatLng };
     }
 
-    // looks like it moved — but wait for it to repeat before trusting it
-    if (pendingLatLng && pendingLatLng.distanceTo(point) < MIN_DISTANCE_M) {
-      pendingStreak++;
-    } else {
-      pendingStreak = 1;
-    }
-    pendingLatLng = point;
-
-    if (pendingStreak >= CONFIRM_STREAK) {
-      totalDistanceM += confirmedLatLng.distanceTo(point);
+    if (motionState === 'moving') {
+      // Already confirmed as moving — commit every qualifying reading right
+      // away, no waiting. This is what keeps continuous motion smooth.
+      totalDistanceM += dist;
       confirmedLatLng = point;
-      pendingLatLng = null;
-      pendingStreak = 0;
       isDeviceMoving = true;
       updateDistanceDisplay();
       return { moved: true, point };
     }
 
+    // Currently stationary but this reading suggests movement — require one
+    // more consecutive reading to land in roughly the same new spot before
+    // trusting it, to reject a single noisy speed/position spike.
+    if (pendingLatLng && pendingLatLng.distanceTo(point) < MIN_DISTANCE_M) {
+      totalDistanceM += dist;
+      confirmedLatLng = point;
+      motionState = 'moving';
+      isDeviceMoving = true;
+      pendingLatLng = null;
+      updateDistanceDisplay();
+      return { moved: true, point };
+    }
+
+    pendingLatLng = point;
     isDeviceMoving = false;
     return { moved: false, point: confirmedLatLng };
   }
